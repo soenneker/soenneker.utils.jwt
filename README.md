@@ -8,5 +8,5 @@
 ## Installation
 
 ```
-Install-Package Soenneker.Utils.Jwt
+dotnet add package Soenneker.Utils.Jwt
 ```
