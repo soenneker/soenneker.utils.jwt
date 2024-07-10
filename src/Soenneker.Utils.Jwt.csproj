@@ -41,7 +41,7 @@
 
         
 
-        <PackageReference Include="Soenneker.Extensions.Configuration" Version="2.1.351" />
+        <PackageReference Include="Soenneker.Extensions.Configuration" Version="2.1.352" />
 
         <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.6.3" />
     </ItemGroup>
