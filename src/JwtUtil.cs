@@ -29,7 +29,7 @@ public class JwtUtil : IJwtUtil
     public TokenValidationParameters GetValidationParameters()
     {
         if (_config == null)
-            throw new NullReferenceException("Parameterless GetValidationParameters() needs config to be populated");
+            throw new InvalidOperationException("Configuration is required for GetValidationParameters()");
 
         var clientId = _config.GetValueStrict<string>("Azure:B2C:ClientId");
         var jwtIssuer = _config.GetValueStrict<string>("Azure:B2C:JwtIssuer");
@@ -41,17 +41,15 @@ public class JwtUtil : IJwtUtil
 
     public TokenValidationParameters GetValidationParameters(string jwtAudience, string jwtIssuer, string publicKey, string exponent)
     {
-        var rsa = new RSACryptoServiceProvider();
+        using var rsa = new RSACryptoServiceProvider();
 
-        rsa.ImportParameters(
-            new RSAParameters
-            {
-                // Public key ("n")
-                Modulus = Base64UrlEncoder.DecodeBytes(publicKey),
-                Exponent = Base64UrlEncoder.DecodeBytes(exponent)
-            });
+        rsa.ImportParameters(new RSAParameters
+        {
+            Modulus = Base64UrlEncoder.DecodeBytes(publicKey),
+            Exponent = Base64UrlEncoder.DecodeBytes(exponent)
+        });
 
-        var parameters = new TokenValidationParameters
+        return new TokenValidationParameters
         {
             ClockSkew = TimeSpan.Zero,
             RequireSignedTokens = true,
@@ -61,11 +59,9 @@ public class JwtUtil : IJwtUtil
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidIssuer = jwtIssuer,
-            IssuerSigningKey = new RsaSecurityKey(rsa),
+            IssuerSigningKey = new RsaSecurityKey(rsa.ExportParameters(false)), // Only exports public parameters
             ValidAudience = jwtAudience
         };
-
-        return parameters;
     }
 
     public ClaimsPrincipal? GetPrincipal(string token, bool validateLifetime = true)
@@ -77,22 +73,21 @@ public class JwtUtil : IJwtUtil
 
         try
         {
-            ClaimsPrincipal? principal = handler.ValidateToken(token, parameters, out SecurityToken _);
-            return principal;
+            return handler.ValidateToken(token, parameters, out _);
         }
-        catch (SecurityTokenExpiredException expiredException)
+        catch (SecurityTokenExpiredException ex)
         {
-            _logger?.LogWarning(expiredException, "Expired token exception");
+            _logger?.LogWarning(ex, "Token has expired");
             return null;
         }
-        catch (SecurityTokenInvalidSignatureException invalidException)
+        catch (SecurityTokenInvalidSignatureException ex)
         {
-            _logger?.LogCritical(invalidException, "Invalid signature exception");
+            _logger?.LogCritical(ex, "Invalid token signature");
             return null;
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
-            _logger?.LogError(e, "Uncaught exception decoding JWT");
+            _logger?.LogError(ex, "Error decoding JWT");
             return null;
         }
     }
