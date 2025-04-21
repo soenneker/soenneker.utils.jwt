@@ -18,7 +18,7 @@ public interface IJwtUtil
     [Pure]
     TokenValidationParameters GetValidationParameters();
 
-    /// <param name="jwtAudience">ClientId of the application within B2C</param>
+    /// <param name="jwtAudience">ClientId of the application within AzureAd</param>
     /// <param name="jwtIssuer"></param>
     /// <param name="publicKey"></param>
     /// <param name="exponent"></param>

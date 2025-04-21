@@ -31,10 +31,10 @@ public class JwtUtil : IJwtUtil
         if (_config == null)
             throw new InvalidOperationException("Configuration is required for GetValidationParameters()");
 
-        var clientId = _config.GetValueStrict<string>("Azure:B2C:ClientId");
-        var jwtIssuer = _config.GetValueStrict<string>("Azure:B2C:JwtIssuer");
-        var jwtPublicKey = _config.GetValueStrict<string>("Azure:B2C:JwtPublicKey");
-        var jwtExponent = _config.GetValueStrict<string>("Azure:B2C:JwtExponent");
+        var clientId = _config.GetValueStrict<string>("Azure:AzureAd:ClientId");
+        var jwtIssuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
+        var jwtPublicKey = _config.GetValueStrict<string>("Azure:AzureAd:JwtPublicKey");
+        var jwtExponent = _config.GetValueStrict<string>("Azure:AzureAd:JwtExponent");
 
         return GetValidationParameters(clientId, jwtIssuer, jwtPublicKey, jwtExponent);
     }
