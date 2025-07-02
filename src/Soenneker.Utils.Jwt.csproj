@@ -36,12 +36,12 @@
         <None Include="..\README.md" Pack="true" PackagePath="\" />
         <None Include="..\LICENSE" Pack="true" PackagePath="\" />
         <None Include="..\icon.png" Pack="true" PackagePath="\" />
-        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.6" />
-
         
-
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.6" />
+        <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.12.1" />
         <PackageReference Include="Soenneker.Extensions.Configuration" Version="3.0.705" />
-
+        <PackageReference Include="Soenneker.Extensions.Task" Version="3.0.103" />
+        <PackageReference Include="Soenneker.Extensions.ValueTask" Version="3.0.93" />
         <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.12.1" />
     </ItemGroup>
 </Project>

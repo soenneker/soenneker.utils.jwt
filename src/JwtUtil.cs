@@ -1,12 +1,18 @@
-﻿using System;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Tokens;
+using Soenneker.Extensions.Configuration;
+using Soenneker.Extensions.Task;
+using Soenneker.Extensions.ValueTask;
+using Soenneker.Utils.Jwt.Abstract;
+using System;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
-using Microsoft.IdentityModel.Tokens;
-using Soenneker.Extensions.Configuration;
-using Soenneker.Utils.Jwt.Abstract;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Soenneker.Utils.Jwt;
 
@@ -16,6 +22,8 @@ public sealed class JwtUtil : IJwtUtil
     private readonly IConfiguration? _config;
     private readonly ILogger<JwtUtil>? _logger;
 
+    private readonly ConfigurationManager<OpenIdConnectConfiguration>? _configurationManager;
+
     public JwtUtil()
     {
     }
@@ -24,19 +32,13 @@ public sealed class JwtUtil : IJwtUtil
     {
         _config = config;
         _logger = logger;
-    }
 
-    public TokenValidationParameters GetValidationParameters()
-    {
-        if (_config == null)
-            throw new InvalidOperationException("Configuration is required for GetValidationParameters()");
+        var issuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
 
-        var clientId = _config.GetValueStrict<string>("Azure:AzureAd:ClientId");
-        var jwtIssuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
-        var jwtPublicKey = _config.GetValueStrict<string>("Azure:AzureAd:JwtPublicKey");
-        var jwtExponent = _config.GetValueStrict<string>("Azure:AzureAd:JwtExponent");
+        var documentRetriever = new HttpDocumentRetriever {RequireHttps = true};
 
-        return GetValidationParameters(clientId, jwtIssuer, jwtPublicKey, jwtExponent);
+        _configurationManager = new ConfigurationManager<OpenIdConnectConfiguration>($"{issuer}/.well-known/openid-configuration",
+            new OpenIdConnectConfigurationRetriever(), documentRetriever);
     }
 
     public TokenValidationParameters GetValidationParameters(string jwtAudience, string jwtIssuer, string publicKey, string exponent)
@@ -64,16 +66,39 @@ public sealed class JwtUtil : IJwtUtil
         };
     }
 
-    public ClaimsPrincipal? GetPrincipal(string token, bool validateLifetime = true)
+    public async ValueTask<TokenValidationParameters> GetValidationParameters(bool validateLifetime = true, CancellationToken cancellationToken = default)
+    {
+        if (_config == null || _configurationManager == null)
+            throw new InvalidOperationException("Configuration is required");
+
+        var audience = _config.GetValueStrict<string>("Azure:AzureAd:ClientId");
+        var issuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
+
+        OpenIdConnectConfiguration? config = await _configurationManager.GetConfigurationAsync(cancellationToken).NoSync();
+
+        return new TokenValidationParameters
+        {
+            ClockSkew = TimeSpan.Zero,
+            RequireSignedTokens = true,
+            RequireExpirationTime = true,
+            ValidateLifetime = validateLifetime,
+            ValidateAudience = true,
+            ValidAudience = audience,
+            ValidateIssuer = true,
+            ValidIssuer = issuer,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKeys = config.SigningKeys // ← uses keys from discovery metadata
+        };
+    }
+
+    public async ValueTask<ClaimsPrincipal?> GetPrincipal(string token, bool validateLifetime = true, CancellationToken cancellationToken = default)
     {
         var handler = new JwtSecurityTokenHandler();
 
-        TokenValidationParameters parameters = GetValidationParameters();
-        parameters.ValidateLifetime = validateLifetime;
-
         try
         {
-            return handler.ValidateToken(token, parameters, out _);
+            TokenValidationParameters validationParameters = await GetValidationParameters(validateLifetime, cancellationToken).NoSync();
+            return handler.ValidateToken(token, validationParameters, out _);
         }
         catch (SecurityTokenExpiredException ex)
         {
