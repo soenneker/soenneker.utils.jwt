@@ -11,7 +11,7 @@ using Soenneker.Utils.Jwt.Abstract;
 namespace Soenneker.Utils.Jwt;
 
 ///<inheritdoc cref="IJwtUtil"/>
-public class JwtUtil : IJwtUtil
+public sealed class JwtUtil : IJwtUtil
 {
     private readonly IConfiguration? _config;
     private readonly ILogger<JwtUtil>? _logger;
