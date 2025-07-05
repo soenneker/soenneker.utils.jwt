@@ -66,7 +66,8 @@ public sealed class JwtUtil : IJwtUtil
         };
     }
 
-    public async ValueTask<TokenValidationParameters> GetValidationParameters(bool validateLifetime = true, CancellationToken cancellationToken = default)
+    // Needs to remain Task until async startup
+    public async Task<TokenValidationParameters> GetValidationParameters(bool validateLifetime = true, CancellationToken cancellationToken = default)
     {
         if (_config == null || _configurationManager == null)
             throw new InvalidOperationException("Configuration is required");

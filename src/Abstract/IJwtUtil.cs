@@ -27,7 +27,7 @@ public interface IJwtUtil
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
     [Pure]
-    ValueTask<TokenValidationParameters> GetValidationParameters(bool validateLifetime = true, CancellationToken cancellationToken = default);
+    Task<TokenValidationParameters> GetValidationParameters(bool validateLifetime = true, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Requires that <see cref="IConfiguration"/> be registered and configured in DI
