@@ -65,7 +65,7 @@ public sealed class JwtUtil : IJwtUtil
         };
     }
 
-    // Needs to remain Task until async startup
+    // Needs to remain Task until async startup 
     public async Task<TokenValidationParameters> GetValidationParameters(bool validateLifetime = true, CancellationToken cancellationToken = default)
     {
         if (_config == null || _configurationManager == null)
