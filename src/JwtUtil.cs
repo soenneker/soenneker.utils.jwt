@@ -5,7 +5,6 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using Soenneker.Extensions.Configuration;
 using Soenneker.Extensions.Task;
-using Soenneker.Extensions.ValueTask;
 using Soenneker.Utils.Jwt.Abstract;
 using System;
 using System.IdentityModel.Tokens.Jwt;
@@ -33,17 +32,17 @@ public sealed class JwtUtil : IJwtUtil
         _config = config;
         _logger = logger;
 
-        var issuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
+        var metadataAddress = _config.GetValueStrict<string>("Azure:AzureAd:MetadataAddress");
 
         var documentRetriever = new HttpDocumentRetriever {RequireHttps = true};
 
-        _configurationManager = new ConfigurationManager<OpenIdConnectConfiguration>($"{issuer}/.well-known/openid-configuration",
+        _configurationManager = new ConfigurationManager<OpenIdConnectConfiguration>(metadataAddress,
             new OpenIdConnectConfigurationRetriever(), documentRetriever);
     }
 
     public TokenValidationParameters GetValidationParameters(string jwtAudience, string jwtIssuer, string publicKey, string exponent)
     {
-        using var rsa = new RSACryptoServiceProvider();
+        using var rsa = RSA.Create();
 
         rsa.ImportParameters(new RSAParameters
         {
@@ -75,7 +74,17 @@ public sealed class JwtUtil : IJwtUtil
         var audience = _config.GetValueStrict<string>("Azure:AzureAd:ClientId");
         var issuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
 
-        OpenIdConnectConfiguration? config = await _configurationManager.GetConfigurationAsync(cancellationToken).NoSync();
+        OpenIdConnectConfiguration? config;
+
+        try
+        {
+            config = await _configurationManager.GetConfigurationAsync(cancellationToken).NoSync();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to retrieve OpenID configuration");
+            throw;
+        }
 
         return new TokenValidationParameters
         {
