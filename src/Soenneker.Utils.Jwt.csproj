@@ -38,7 +38,7 @@
         <None Include="..\icon.png" Pack="true" PackagePath="\" />
         
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.8" />
-        <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.13.0" />
+        <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.13.1" />
         <PackageReference Include="Soenneker.Extensions.Configuration" Version="3.0.710" />
         <PackageReference Include="Soenneker.Extensions.Task" Version="3.0.103" />
         <PackageReference Include="Soenneker.Extensions.ValueTask" Version="3.0.93" />
