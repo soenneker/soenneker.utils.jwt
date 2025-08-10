@@ -4,9 +4,11 @@ using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using Soenneker.Extensions.Configuration;
+using Soenneker.Extensions.String;
 using Soenneker.Extensions.Task;
 using Soenneker.Utils.Jwt.Abstract;
 using System;
+using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -125,5 +127,90 @@ public sealed class JwtUtil : IJwtUtil
             _logger?.LogError(ex, "Error decoding JWT");
             return null;
         }
+    }
+
+
+    public string Create(string subject, IDictionary<string, object>? extraClaims = null, TimeSpan? lifetime = null, string? signingKey = null)
+    {
+        signingKey ??= _config!.GetValueStrict<string>("Jwt:SigningKey");
+        var ttlMinutes = _config!.GetValueStrict<int>("Jwt:LifetimeMinutes");
+
+        DateTime now = DateTime.UtcNow;
+        DateTime expires = now.Add(lifetime ?? TimeSpan.FromMinutes(ttlMinutes));
+
+        SymmetricSecurityKey key = BuildSymmetricKey(signingKey);
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var claims = new List<Claim>
+        {
+            new(JwtRegisteredClaimNames.Sub, subject),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
+            new(JwtRegisteredClaimNames.Iat, new DateTimeOffset(now).ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
+        };
+
+        if (extraClaims != null)
+        {
+            foreach ((string k, var v) in extraClaims)
+            {
+                if (v is null) 
+                    continue;
+
+                // avoid overwriting core registered claims
+                if (k is JwtRegisteredClaimNames.Sub or JwtRegisteredClaimNames.Iat or JwtRegisteredClaimNames.Jti or JwtRegisteredClaimNames.Exp or "nbf")
+                    continue;
+
+                claims.Add(new Claim(k, v.ToString()!));
+            }
+        }
+
+        var token = new JwtSecurityToken(claims: claims, notBefore: now.AddSeconds(-5), // small skew tolerance
+            expires: expires, signingCredentials: credentials);
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    public ClaimsPrincipal? Verify(string token, bool validateLifetime = true, string? signingKey = null)
+    {
+        try
+        {
+            signingKey ??= _config!.GetValueStrict<string>("Jwt:SigningKey");
+
+            var tvp = new TokenValidationParameters
+            {
+                ClockSkew = TimeSpan.Zero,
+                RequireSignedTokens = true,
+                RequireExpirationTime = true,
+                ValidateLifetime = validateLifetime,
+                ValidateIssuer = false,
+                ValidateAudience = false,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = BuildSymmetricKey(signingKey)
+            };
+
+            var handler = new JwtSecurityTokenHandler();
+            return handler.ValidateToken(token, tvp, out _);
+        }
+        catch (SecurityTokenExpiredException ex)
+        {
+            _logger?.LogWarning(ex, "Token expired");
+            return null;
+        }
+        catch (SecurityTokenInvalidSignatureException ex)
+        {
+            _logger?.LogCritical(ex, "Invalid token signature");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Token verification failed");
+            return null;
+        }
+    }
+
+    private static SymmetricSecurityKey BuildSymmetricKey(string rawKey)
+    {
+        byte[] bytes = rawKey.ToBytes();
+
+        return new SymmetricSecurityKey(bytes);
     }
 }

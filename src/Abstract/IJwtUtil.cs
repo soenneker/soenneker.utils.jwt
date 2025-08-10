@@ -1,5 +1,7 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics.Contracts;
 using System.Security.Claims;
 using System.Threading;
@@ -34,4 +36,19 @@ public interface IJwtUtil
     /// </summary>
     [Pure]
     ValueTask<ClaimsPrincipal?> GetPrincipal(string token, bool validateLifetime = true, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Create a compact HS256 JWT with only the essentials: sub, jti, iat, exp (+ optional extra claims).
+    /// Reads SigningKey from config key "Jwt:SigningKey" unless provided.
+    /// </summary>
+    [Pure]
+    string Create(string subject, IDictionary<string, object>? extraClaims = null, TimeSpan? lifetime = null, string? signingKey = null);
+
+    /// <summary>
+    /// Verify signature and (optionally) lifetime. No issuer/audience validation.
+    /// Reads SigningKey from "Jwt:ClientState:SigningKey" unless provided.
+    /// Returns ClaimsPrincipal on success, null on failure.
+    /// </summary>
+    [Pure]
+    ClaimsPrincipal? Verify(string token, bool validateLifetime = true, string? signingKey = null);
 }
