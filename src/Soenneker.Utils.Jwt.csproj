@@ -41,6 +41,6 @@
         <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.15.0" />
         <PackageReference Include="Soenneker.Extensions.Configuration" Version="4.0.745" />
         <PackageReference Include="Soenneker.Extensions.Task" Version="4.0.109" />
-        <PackageReference Include="Soenneker.Extensions.ValueTask" Version="4.0.98" />
+        <PackageReference Include="Soenneker.Extensions.ValueTask" Version="4.0.101" />
     </ItemGroup>
 </Project>
