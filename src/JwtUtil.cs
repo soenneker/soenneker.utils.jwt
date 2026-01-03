@@ -142,8 +142,8 @@ public sealed class JwtUtil : IJwtUtil
         signingKey ??= GetDefaultSigningKey();
         int ttlMinutes = GetLifetimeMinutes();
 
-        DateTime now = DateTime.UtcNow;
-        DateTime expires = now.Add(lifetime ?? TimeSpan.FromMinutes(ttlMinutes));
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset expires = now.Add(lifetime ?? TimeSpan.FromMinutes(ttlMinutes));
 
         SigningCredentials credentials = GetSigningCredentials(signingKey);
 
@@ -152,7 +152,7 @@ public sealed class JwtUtil : IJwtUtil
         {
             new(JwtRegisteredClaimNames.Sub, subject),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
-            new(JwtRegisteredClaimNames.Iat, new DateTimeOffset(now).ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
+            new(JwtRegisteredClaimNames.Iat, now.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
         };
 
         if (extraClaims != null)
@@ -176,8 +176,8 @@ public sealed class JwtUtil : IJwtUtil
 
         var token = new JwtSecurityToken(
             claims: claims,
-            notBefore: now.AddSeconds(-5), // small skew tolerance
-            expires: expires,
+            notBefore: now.AddSeconds(-5).UtcDateTime, // small skew tolerance
+            expires: expires.UtcDateTime,
             signingCredentials: credentials);
 
         return _handler.WriteToken(token);
