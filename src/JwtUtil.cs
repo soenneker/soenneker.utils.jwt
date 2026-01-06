@@ -16,10 +16,9 @@ using System.Threading.Tasks;
 
 namespace Soenneker.Utils.Jwt;
 
-/// <inheritdoc cref="IJwtUtil"/>
+///<inheritdoc cref="IJwtUtil"/>
 public sealed class JwtUtil : IJwtUtil
 {
-    // Reuse handler (cuts allocations; behavior unchanged unless you mutate handler properties, which we don't).
     private static readonly JwtSecurityTokenHandler _handler = new();
 
     private readonly IConfiguration? _config;
@@ -27,13 +26,25 @@ public sealed class JwtUtil : IJwtUtil
 
     private readonly ConfigurationManager<OpenIdConnectConfiguration>? _configurationManager;
 
-    // Lazy cached default signing objects (common path: config signing key)
-    private string? _defaultSigningKey;
-    private SymmetricSecurityKey? _defaultSymmetricKey;
-    private SigningCredentials? _defaultSigningCredentials;
+    // Cached config values (no per-call config reads)
+    private readonly string? _azureAudience;
+    private readonly string? _azureIssuer;
+
+    private readonly int _jwtLifetimeMinutes;
+
+    // Default signing material cache
+    private readonly string? _defaultSigningKeyRaw;
+    private readonly byte[]? _defaultSigningKeyBytes;
+    private readonly SymmetricSecurityKey? _defaultSymmetricKey;
+    private readonly SigningCredentials? _defaultSigningCredentials;
+
+    // Verify() TVP cache for default key (validateLifetime true/false)
+    private readonly TokenValidationParameters? _verifyTvpValidateLifetime;
+    private readonly TokenValidationParameters? _verifyTvpNoValidateLifetime;
 
     public JwtUtil()
     {
+        // parameterless for DI flexibility, but Create/Verify/GetValidationParameters(bool) will throw if config missing
     }
 
     public JwtUtil(IConfiguration config, ILogger<JwtUtil>? logger)
@@ -41,18 +52,43 @@ public sealed class JwtUtil : IJwtUtil
         _config = config;
         _logger = logger;
 
+        _defaultSigningKeyRaw = _config.GetValueStrict<string>("Jwt:SigningKey");
+        _jwtLifetimeMinutes = _config.GetValueStrict<int>("Jwt:LifetimeMinutes");
+
+        _azureAudience = _config.GetValueStrict<string>("Azure:AzureAd:ClientId");
+        _azureIssuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
+
+        _defaultSigningKeyBytes = _defaultSigningKeyRaw.ToBytes();
+        _defaultSymmetricKey = new SymmetricSecurityKey(_defaultSigningKeyBytes);
+        _defaultSigningCredentials = new SigningCredentials(_defaultSymmetricKey, SecurityAlgorithms.HmacSha256);
+
+        // Cache Verify TVPs (default key only)
+        _verifyTvpValidateLifetime = BuildVerifyTvp(validateLifetime: true, _defaultSymmetricKey);
+        _verifyTvpNoValidateLifetime = BuildVerifyTvp(validateLifetime: false, _defaultSymmetricKey);
+
         var metadataAddress = _config.GetValueStrict<string>("Azure:AzureAd:MetadataAddress");
         var documentRetriever = new HttpDocumentRetriever { RequireHttps = true };
 
         _configurationManager = new ConfigurationManager<OpenIdConnectConfiguration>(
-            metadataAddress,
-            new OpenIdConnectConfigurationRetriever(),
-            documentRetriever);
+            metadataAddress, new OpenIdConnectConfigurationRetriever(), documentRetriever);
     }
+
+    private static TokenValidationParameters BuildVerifyTvp(bool validateLifetime, SymmetricSecurityKey key) => new()
+    {
+        ClockSkew = TimeSpan.Zero,
+        RequireSignedTokens = true,
+        RequireExpirationTime = true,
+        ValidateLifetime = validateLifetime,
+
+        ValidateIssuer = false,
+        ValidateAudience = false,
+
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = key
+    };
 
     public TokenValidationParameters GetValidationParameters(string jwtAudience, string jwtIssuer, string publicKey, string exponent)
     {
-        // Avoid RSA.Create() + ExportParameters(false); build the key directly from RSAParameters.
         var rsaParams = new System.Security.Cryptography.RSAParameters
         {
             Modulus = Base64UrlEncoder.DecodeBytes(publicKey),
@@ -74,20 +110,17 @@ public sealed class JwtUtil : IJwtUtil
         };
     }
 
-    // Needs to remain Task until async startup
     public async Task<TokenValidationParameters> GetValidationParameters(bool validateLifetime = true, CancellationToken cancellationToken = default)
     {
-        if (_config == null || _configurationManager == null)
+        if (_configurationManager == null || _azureAudience == null || _azureIssuer == null)
             throw new InvalidOperationException("Configuration is required");
-
-        var audience = _config.GetValueStrict<string>("Azure:AzureAd:ClientId");
-        var issuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
 
         OpenIdConnectConfiguration openIdConfig;
 
         try
         {
-            openIdConfig = await _configurationManager.GetConfigurationAsync(cancellationToken).NoSync();
+            openIdConfig = await _configurationManager.GetConfigurationAsync(cancellationToken)
+                                                      .NoSync();
         }
         catch (Exception ex)
         {
@@ -103,13 +136,13 @@ public sealed class JwtUtil : IJwtUtil
             ValidateLifetime = validateLifetime,
 
             ValidateAudience = true,
-            ValidAudience = audience,
+            ValidAudience = _azureAudience,
 
             ValidateIssuer = true,
-            ValidIssuer = issuer,
+            ValidIssuer = _azureIssuer,
 
             ValidateIssuerSigningKey = true,
-            IssuerSigningKeys = openIdConfig.SigningKeys // uses keys from discovery metadata
+            IssuerSigningKeys = openIdConfig.SigningKeys
         };
     }
 
@@ -117,7 +150,9 @@ public sealed class JwtUtil : IJwtUtil
     {
         try
         {
-            TokenValidationParameters validationParameters = await GetValidationParameters(validateLifetime, cancellationToken).NoSync();
+            TokenValidationParameters validationParameters = await GetValidationParameters(validateLifetime, cancellationToken)
+                .NoSync();
+
             return _handler.ValidateToken(token, validationParameters, out _);
         }
         catch (SecurityTokenExpiredException ex)
@@ -139,70 +174,85 @@ public sealed class JwtUtil : IJwtUtil
 
     public string Create(string subject, IDictionary<string, object>? extraClaims = null, TimeSpan? lifetime = null, string? signingKey = null)
     {
-        signingKey ??= GetDefaultSigningKey();
-        int ttlMinutes = GetLifetimeMinutes();
+        SigningCredentials creds;
+        int ttlMinutes;
+
+        if (signingKey == null)
+        {
+            if (_defaultSigningCredentials == null)
+                throw new InvalidOperationException("Configuration is required");
+
+            creds = _defaultSigningCredentials;
+            ttlMinutes = _jwtLifetimeMinutes;
+        }
+        else
+        {
+            // Override path: avoid retaining unbounded key material
+            creds = new SigningCredentials(new SymmetricSecurityKey(signingKey.ToBytes()), SecurityAlgorithms.HmacSha256);
+            ttlMinutes = _jwtLifetimeMinutes != 0 ? _jwtLifetimeMinutes : (_config?.GetValueStrict<int>("Jwt:LifetimeMinutes") ?? 0);
+        }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         DateTimeOffset expires = now.Add(lifetime ?? TimeSpan.FromMinutes(ttlMinutes));
 
-        SigningCredentials credentials = GetSigningCredentials(signingKey);
-
-        // Pre-size: 3 core claims + extras (upper bound)
         var claims = new List<Claim>(3 + (extraClaims?.Count ?? 0))
         {
             new(JwtRegisteredClaimNames.Sub, subject),
-            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
-            new(JwtRegisteredClaimNames.Iat, now.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid()
+                                                 .ToString("N")),
+            new(JwtRegisteredClaimNames.Iat, now.ToUnixTimeSeconds()
+                                                .ToString(), ClaimValueTypes.Integer64)
         };
 
         if (extraClaims != null)
         {
-            foreach ((string k, var v) in extraClaims)
+            // Fast-path to avoid interface enumerator boxing
+            if (extraClaims is Dictionary<string, object> dict)
             {
-                if (v is null)
-                    continue;
-
-                // avoid overwriting core registered claims
-                if (k is JwtRegisteredClaimNames.Sub
-                    or JwtRegisteredClaimNames.Iat
-                    or JwtRegisteredClaimNames.Jti
-                    or JwtRegisteredClaimNames.Exp
-                    or "nbf")
-                    continue;
-
-                claims.Add(new Claim(k, v.ToString()!));
+                foreach (var kvp in dict)
+                    AddExtraClaimIfValid(claims, kvp.Key, kvp.Value);
+            }
+            else
+            {
+                foreach (var kvp in extraClaims)
+                    AddExtraClaimIfValid(claims, kvp.Key, kvp.Value);
             }
         }
 
-        var token = new JwtSecurityToken(
-            claims: claims,
-            notBefore: now.AddSeconds(-5).UtcDateTime, // small skew tolerance
-            expires: expires.UtcDateTime,
-            signingCredentials: credentials);
+        var token = new JwtSecurityToken(claims: claims, notBefore: now.AddSeconds(-5)
+                                                                       .UtcDateTime, expires: expires.UtcDateTime, signingCredentials: creds);
 
         return _handler.WriteToken(token);
+
+        static void AddExtraClaimIfValid(List<Claim> claims, string k, object? v)
+        {
+            if (v is null)
+                return;
+
+            if (k is JwtRegisteredClaimNames.Sub or JwtRegisteredClaimNames.Iat or JwtRegisteredClaimNames.Jti or JwtRegisteredClaimNames.Exp or "nbf")
+                return;
+
+            claims.Add(new Claim(k, v.ToString()!));
+        }
     }
 
     public ClaimsPrincipal? Verify(string token, bool validateLifetime = true, string? signingKey = null)
     {
         try
         {
-            // Keep old behavior: signingKey is optional; when null we read Jwt:SigningKey from config.
-            signingKey ??= GetDefaultSigningKey();
+            TokenValidationParameters tvp;
 
-            var tvp = new TokenValidationParameters
+            if (signingKey == null)
             {
-                ClockSkew = TimeSpan.Zero,
-                RequireSignedTokens = true,
-                RequireExpirationTime = true,
-                ValidateLifetime = validateLifetime,
+                if (_verifyTvpValidateLifetime == null || _verifyTvpNoValidateLifetime == null)
+                    throw new InvalidOperationException("Configuration is required");
 
-                ValidateIssuer = false,
-                ValidateAudience = false,
-
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = GetSymmetricKey(signingKey)
-            };
+                tvp = validateLifetime ? _verifyTvpValidateLifetime : _verifyTvpNoValidateLifetime;
+            }
+            else
+            {
+                tvp = BuildVerifyTvp(validateLifetime, new SymmetricSecurityKey(signingKey.ToBytes()));
+            }
 
             return _handler.ValidateToken(token, tvp, out _);
         }
@@ -221,34 +271,5 @@ public sealed class JwtUtil : IJwtUtil
             _logger?.LogError(ex, "Token verification failed");
             return null;
         }
-    }
-
-    private string GetDefaultSigningKey()
-    {
-        return _defaultSigningKey ??= _config.GetValueStrict<string>("Jwt:SigningKey");
-    }
-
-    private int GetLifetimeMinutes()
-    {
-        return _config.GetValueStrict<int>("Jwt:LifetimeMinutes");
-    }
-
-    private SymmetricSecurityKey GetSymmetricKey(string rawKey)
-    {
-        // Common path: default config signing key. Cache to avoid per-call byte[] allocation.
-        if (_defaultSigningKey != null && rawKey == _defaultSigningKey)
-            return _defaultSymmetricKey ??= new SymmetricSecurityKey(rawKey.ToBytes());
-
-        // Override keys: don't cache by default (avoid unbounded key-material retention).
-        return new SymmetricSecurityKey(rawKey.ToBytes());
-    }
-
-    private SigningCredentials GetSigningCredentials(string rawKey)
-    {
-        // Common path: default config signing key. Cache creds too.
-        if (_defaultSigningKey != null && rawKey == _defaultSigningKey)
-            return _defaultSigningCredentials ??= new SigningCredentials(GetSymmetricKey(rawKey), SecurityAlgorithms.HmacSha256);
-
-        return new SigningCredentials(GetSymmetricKey(rawKey), SecurityAlgorithms.HmacSha256);
     }
 }
