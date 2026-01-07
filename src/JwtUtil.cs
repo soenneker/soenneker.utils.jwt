@@ -25,24 +25,13 @@ public sealed class JwtUtil : IJwtUtil
     private readonly IConfiguration? _config;
     private readonly ILogger<JwtUtil>? _logger;
 
-    private readonly ConfigurationManager<OpenIdConnectConfiguration>? _configurationManager;
-
-    // Cached config values (no per-call config reads)
-    private readonly string? _azureAudience;
-    private readonly string? _azureIssuer;
-
-    private readonly int _jwtLifetimeMinutes;
-
-    // Default signing material cache
-    private readonly SigningCredentials? _defaultSigningCredentials;
-
-    // Verify() TVP cache for default key (validateLifetime true/false)
-    private readonly TokenValidationParameters? _verifyTvpValidateLifetime;
-    private readonly TokenValidationParameters? _verifyTvpNoValidateLifetime;
+    // Feature bundles (initialized only if feature is used)
+    private readonly Lazy<DefaultSigningFeature>? _defaultSigningFeature;
+    private readonly Lazy<AzureValidationFeature>? _azureValidationFeature;
 
     public JwtUtil()
     {
-        // parameterless for DI flexibility, but Create/Verify/GetValidationParameters(bool) will throw if config missing
+        // parameterless for DI flexibility; feature accessors will throw if config missing
     }
 
     public JwtUtil(IConfiguration config, ILogger<JwtUtil>? logger)
@@ -50,25 +39,48 @@ public sealed class JwtUtil : IJwtUtil
         _config = config;
         _logger = logger;
 
-        var defaultSigningKeyRaw = _config.GetValueStrict<string>("Jwt:SigningKey");
-        _jwtLifetimeMinutes = _config.GetValueStrict<int>("Jwt:LifetimeMinutes");
+        // Default signing / default verify (Jwt:*). Nothing is read until Create/Verify (default key) is used.
+        _defaultSigningFeature = new Lazy<DefaultSigningFeature>(CreateDefaultSigningFeature, isThreadSafe: true);
 
-        _azureAudience = _config.GetValueStrict<string>("Azure:AzureAd:ClientId");
-        _azureIssuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
+        // Azure OIDC validation (Azure:*). Nothing is read until GetPrincipal/GetValidationParameters(bool) is used.
+        _azureValidationFeature = new Lazy<AzureValidationFeature>(CreateAzureValidationFeature, isThreadSafe: true);
+    }
 
-        byte[]? defaultSigningKeyBytes = defaultSigningKeyRaw.ToBytes();
-        var defaultSymmetricKey = new SymmetricSecurityKey(defaultSigningKeyBytes);
-        _defaultSigningCredentials = new SigningCredentials(defaultSymmetricKey, SecurityAlgorithms.HmacSha256);
+    private DefaultSigningFeature CreateDefaultSigningFeature()
+    {
+        if (_config is null)
+            throw new InvalidOperationException("Configuration is required");
+
+        var signingKeyRaw = _config.GetValueStrict<string>("Jwt:SigningKey");
+        var ttlMinutes = _config.GetValueStrict<int>("Jwt:LifetimeMinutes");
+
+        byte[] keyBytes = signingKeyRaw.ToBytes();
+
+        var symmetricKey = new SymmetricSecurityKey(keyBytes);
+        var signingCredentials = new SigningCredentials(symmetricKey, SecurityAlgorithms.HmacSha256);
 
         // Cache Verify TVPs (default key only)
-        _verifyTvpValidateLifetime = BuildVerifyTvp(validateLifetime: true, defaultSymmetricKey);
-        _verifyTvpNoValidateLifetime = BuildVerifyTvp(validateLifetime: false, defaultSymmetricKey);
+        TokenValidationParameters tvpValidateLifetime = BuildVerifyTvp(validateLifetime: true, symmetricKey);
+        TokenValidationParameters tvpNoValidateLifetime = BuildVerifyTvp(validateLifetime: false, symmetricKey);
 
+        return new DefaultSigningFeature(signingCredentials, symmetricKey, ttlMinutes, tvpValidateLifetime, tvpNoValidateLifetime);
+    }
+
+    private AzureValidationFeature CreateAzureValidationFeature()
+    {
+        if (_config is null)
+            throw new InvalidOperationException("Configuration is required");
+
+        var audience = _config.GetValueStrict<string>("Azure:AzureAd:ClientId");
+        var issuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
         var metadataAddress = _config.GetValueStrict<string>("Azure:AzureAd:MetadataAddress");
+
         var documentRetriever = new HttpDocumentRetriever { RequireHttps = true };
 
-        _configurationManager = new ConfigurationManager<OpenIdConnectConfiguration>(
+        var configurationManager = new ConfigurationManager<OpenIdConnectConfiguration>(
             metadataAddress, new OpenIdConnectConfigurationRetriever(), documentRetriever);
+
+        return new AzureValidationFeature(audience, issuer, configurationManager);
     }
 
     private static TokenValidationParameters BuildVerifyTvp(bool validateLifetime, SymmetricSecurityKey key) => new()
@@ -110,15 +122,17 @@ public sealed class JwtUtil : IJwtUtil
 
     public async Task<TokenValidationParameters> GetValidationParameters(bool validateLifetime = true, CancellationToken cancellationToken = default)
     {
-        if (_configurationManager == null || _azureAudience == null || _azureIssuer == null)
+        if (_azureValidationFeature is null)
             throw new InvalidOperationException("Configuration is required");
+
+        AzureValidationFeature azure = _azureValidationFeature.Value;
 
         OpenIdConnectConfiguration openIdConfig;
 
         try
         {
-            openIdConfig = await _configurationManager.GetConfigurationAsync(cancellationToken)
-                                                      .NoSync();
+            openIdConfig = await azure.ConfigurationManager.GetConfigurationAsync(cancellationToken)
+                                      .NoSync();
         }
         catch (Exception ex)
         {
@@ -134,10 +148,10 @@ public sealed class JwtUtil : IJwtUtil
             ValidateLifetime = validateLifetime,
 
             ValidateAudience = true,
-            ValidAudience = _azureAudience,
+            ValidAudience = azure.Audience,
 
             ValidateIssuer = true,
-            ValidIssuer = _azureIssuer,
+            ValidIssuer = azure.Issuer,
 
             ValidateIssuerSigningKey = true,
             IssuerSigningKeys = openIdConfig.SigningKeys
@@ -172,22 +186,32 @@ public sealed class JwtUtil : IJwtUtil
 
     public string Create(string subject, IDictionary<string, object>? extraClaims = null, TimeSpan? lifetime = null, string? signingKey = null)
     {
-        SigningCredentials creds;
+        SigningCredentials credentials;
         int ttlMinutes;
 
-        if (signingKey == null)
+        if (signingKey is null)
         {
-            if (_defaultSigningCredentials == null)
+            if (_defaultSigningFeature is null)
                 throw new InvalidOperationException("Configuration is required");
 
-            creds = _defaultSigningCredentials;
-            ttlMinutes = _jwtLifetimeMinutes;
+            DefaultSigningFeature feature = _defaultSigningFeature.Value;
+            credentials = feature.SigningCredentials;
+            ttlMinutes = feature.TtlMinutes;
         }
         else
         {
-            // Override path: avoid retaining unbounded key material
-            creds = new SigningCredentials(new SymmetricSecurityKey(signingKey.ToBytes()), SecurityAlgorithms.HmacSha256);
-            ttlMinutes = _jwtLifetimeMinutes != 0 ? _jwtLifetimeMinutes : (_config?.GetValueStrict<int>("Jwt:LifetimeMinutes") ?? 0);
+            // Override path: do NOT cache unbounded key material
+            credentials = new SigningCredentials(new SymmetricSecurityKey(signingKey.ToBytes()), SecurityAlgorithms.HmacSha256);
+
+            // Prefer default ttl if configured; otherwise read on-demand
+            if (_defaultSigningFeature is not null)
+            {
+                ttlMinutes = _defaultSigningFeature.Value.TtlMinutes;
+            }
+            else
+            {
+                ttlMinutes = _config?.GetValueStrict<int>("Jwt:LifetimeMinutes") ?? 0;
+            }
         }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -204,7 +228,6 @@ public sealed class JwtUtil : IJwtUtil
 
         if (extraClaims != null)
         {
-            // Fast-path to avoid interface enumerator boxing
             if (extraClaims is Dictionary<string, object> dict)
             {
                 foreach (KeyValuePair<string, object> kvp in dict)
@@ -218,7 +241,7 @@ public sealed class JwtUtil : IJwtUtil
         }
 
         var token = new JwtSecurityToken(claims: claims, notBefore: now.AddSeconds(-5)
-                                                                       .UtcDateTime, expires: expires.UtcDateTime, signingCredentials: creds);
+                                                                       .UtcDateTime, expires: expires.UtcDateTime, signingCredentials: credentials);
 
         return _handler.WriteToken(token);
 
@@ -240,12 +263,13 @@ public sealed class JwtUtil : IJwtUtil
         {
             TokenValidationParameters tvp;
 
-            if (signingKey == null)
+            if (signingKey is null)
             {
-                if (_verifyTvpValidateLifetime == null || _verifyTvpNoValidateLifetime == null)
+                if (_defaultSigningFeature is null)
                     throw new InvalidOperationException("Configuration is required");
 
-                tvp = validateLifetime ? _verifyTvpValidateLifetime : _verifyTvpNoValidateLifetime;
+                DefaultSigningFeature feature = _defaultSigningFeature.Value;
+                tvp = validateLifetime ? feature.VerifyTvpValidateLifetime : feature.VerifyTvpNoValidateLifetime;
             }
             else
             {
@@ -270,4 +294,16 @@ public sealed class JwtUtil : IJwtUtil
             return null;
         }
     }
+
+    private readonly record struct DefaultSigningFeature(
+        SigningCredentials SigningCredentials,
+        SymmetricSecurityKey SymmetricKey,
+        int TtlMinutes,
+        TokenValidationParameters VerifyTvpValidateLifetime,
+        TokenValidationParameters VerifyTvpNoValidateLifetime);
+
+    private readonly record struct AzureValidationFeature(
+        string Audience,
+        string Issuer,
+        ConfigurationManager<OpenIdConnectConfiguration> ConfigurationManager);
 }
