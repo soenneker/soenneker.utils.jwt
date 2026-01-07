@@ -11,6 +11,7 @@ using System;
 using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -33,9 +34,6 @@ public sealed class JwtUtil : IJwtUtil
     private readonly int _jwtLifetimeMinutes;
 
     // Default signing material cache
-    private readonly string? _defaultSigningKeyRaw;
-    private readonly byte[]? _defaultSigningKeyBytes;
-    private readonly SymmetricSecurityKey? _defaultSymmetricKey;
     private readonly SigningCredentials? _defaultSigningCredentials;
 
     // Verify() TVP cache for default key (validateLifetime true/false)
@@ -52,19 +50,19 @@ public sealed class JwtUtil : IJwtUtil
         _config = config;
         _logger = logger;
 
-        _defaultSigningKeyRaw = _config.GetValueStrict<string>("Jwt:SigningKey");
+        var defaultSigningKeyRaw = _config.GetValueStrict<string>("Jwt:SigningKey");
         _jwtLifetimeMinutes = _config.GetValueStrict<int>("Jwt:LifetimeMinutes");
 
         _azureAudience = _config.GetValueStrict<string>("Azure:AzureAd:ClientId");
         _azureIssuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
 
-        _defaultSigningKeyBytes = _defaultSigningKeyRaw.ToBytes();
-        _defaultSymmetricKey = new SymmetricSecurityKey(_defaultSigningKeyBytes);
-        _defaultSigningCredentials = new SigningCredentials(_defaultSymmetricKey, SecurityAlgorithms.HmacSha256);
+        byte[]? defaultSigningKeyBytes = defaultSigningKeyRaw.ToBytes();
+        var defaultSymmetricKey = new SymmetricSecurityKey(defaultSigningKeyBytes);
+        _defaultSigningCredentials = new SigningCredentials(defaultSymmetricKey, SecurityAlgorithms.HmacSha256);
 
         // Cache Verify TVPs (default key only)
-        _verifyTvpValidateLifetime = BuildVerifyTvp(validateLifetime: true, _defaultSymmetricKey);
-        _verifyTvpNoValidateLifetime = BuildVerifyTvp(validateLifetime: false, _defaultSymmetricKey);
+        _verifyTvpValidateLifetime = BuildVerifyTvp(validateLifetime: true, defaultSymmetricKey);
+        _verifyTvpNoValidateLifetime = BuildVerifyTvp(validateLifetime: false, defaultSymmetricKey);
 
         var metadataAddress = _config.GetValueStrict<string>("Azure:AzureAd:MetadataAddress");
         var documentRetriever = new HttpDocumentRetriever { RequireHttps = true };
@@ -89,7 +87,7 @@ public sealed class JwtUtil : IJwtUtil
 
     public TokenValidationParameters GetValidationParameters(string jwtAudience, string jwtIssuer, string publicKey, string exponent)
     {
-        var rsaParams = new System.Security.Cryptography.RSAParameters
+        var rsaParams = new RSAParameters
         {
             Modulus = Base64UrlEncoder.DecodeBytes(publicKey),
             Exponent = Base64UrlEncoder.DecodeBytes(exponent)
@@ -209,12 +207,12 @@ public sealed class JwtUtil : IJwtUtil
             // Fast-path to avoid interface enumerator boxing
             if (extraClaims is Dictionary<string, object> dict)
             {
-                foreach (var kvp in dict)
+                foreach (KeyValuePair<string, object> kvp in dict)
                     AddExtraClaimIfValid(claims, kvp.Key, kvp.Value);
             }
             else
             {
-                foreach (var kvp in extraClaims)
+                foreach (KeyValuePair<string, object> kvp in extraClaims)
                     AddExtraClaimIfValid(claims, kvp.Key, kvp.Value);
             }
         }
