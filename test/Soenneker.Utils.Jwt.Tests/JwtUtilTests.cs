@@ -1,21 +1,20 @@
 using Soenneker.Utils.Jwt.Abstract;
-using Soenneker.Tests.FixturedUnit;
-using Xunit;
+using Soenneker.Tests.HostedUnit;
 
 
 namespace Soenneker.Utils.Jwt.Tests;
 
-[Collection("Collection")]
-public class JwtUtilTests : FixturedUnitTest
+[ClassDataSource<Host>(Shared = SharedType.PerTestSession)]
+public class JwtUtilTests : HostedUnitTest
 {
     private readonly IJwtUtil _util;
 
-    public JwtUtilTests(Fixture fixture, ITestOutputHelper output) : base(fixture, output)
+    public JwtUtilTests(Host host) : base(host)
     {
         _util = Resolve<IJwtUtil>(true);
     }
 
-    [Fact]
+    [Test]
     public void Default()
     {
 
