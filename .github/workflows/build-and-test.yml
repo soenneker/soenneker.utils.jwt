@@ -38,7 +38,7 @@ jobs:
         run: dotnet build test/Soenneker.Utils.Jwt.Tests/Soenneker.Utils.Jwt.Tests.csproj --configuration Release --no-restore --verbosity minimal
 
       - name: Test
-        run: dotnet test test/Soenneker.Utils.Jwt.Tests/Soenneker.Utils.Jwt.Tests.csproj --configuration Release --no-build --no-restore --verbosity minimal
+        run: dotnet test --project test/Soenneker.Utils.Jwt.Tests/Soenneker.Utils.Jwt.Tests.csproj --configuration Release --no-build --no-restore --verbosity minimal
 
       - name: Pack
         run: dotnet pack src/Soenneker.Utils.Jwt/Soenneker.Utils.Jwt.csproj --configuration Release --no-build --no-restore --output . --verbosity minimal
