@@ -42,7 +42,7 @@
         
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
         <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.17.0" />
-        <PackageReference Include="Soenneker.Extensions.Configuration" Version="4.0.814" />
+        <PackageReference Include="Soenneker.Extensions.Configuration" Version="4.0.815" />
         <PackageReference Include="Soenneker.Extensions.Task" Version="4.0.120" />
         <PackageReference Include="Soenneker.Extensions.ValueTask" Version="4.0.113" />
     </ItemGroup>
