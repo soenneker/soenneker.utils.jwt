@@ -41,7 +41,7 @@
         <None Include="..\..\icon.png" Pack="true" PackagePath="\" />
 <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.2" />
         <PackageReference Include="Soenneker.Extensions.Configuration" Version="4.0.845" />
-        <PackageReference Include="Soenneker.Extensions.Task" Version="4.0.123" />
+        <PackageReference Include="Soenneker.Extensions.Task" Version="4.0.124" />
         <PackageReference Include="Soenneker.Extensions.ValueTask" Version="4.0.117" />
     </ItemGroup>
 </Project>
