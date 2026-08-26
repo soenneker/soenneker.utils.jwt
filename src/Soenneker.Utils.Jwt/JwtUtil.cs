@@ -295,15 +295,4 @@ public sealed class JwtUtil : IJwtUtil
         }
     }
 
-    private readonly record struct DefaultSigningFeature(
-        SigningCredentials SigningCredentials,
-        SymmetricSecurityKey SymmetricKey,
-        int TtlMinutes,
-        TokenValidationParameters VerifyTvpValidateLifetime,
-        TokenValidationParameters VerifyTvpNoValidateLifetime);
-
-    private readonly record struct AzureValidationFeature(
-        string Audience,
-        string Issuer,
-        ConfigurationManager<OpenIdConnectConfiguration> ConfigurationManager);
 }
