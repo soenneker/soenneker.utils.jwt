@@ -12,6 +12,7 @@ public static class JwtUtilRegistrar
     /// <summary>
     /// Adds <see cref="IJwtUtil"/> as a scoped service. (Recommended) <para/>
     /// </summary>
+    /// <returns>Adds <see cref="IJwtUtil"/> as a scoped service. (Recommended) <para/>.</returns>
     public static IServiceCollection AddJwtUtilAsScoped(this IServiceCollection services)
     {
         services.TryAddScoped<IJwtUtil, JwtUtil>();
@@ -21,6 +22,7 @@ public static class JwtUtilRegistrar
     /// <summary>
     /// Adds <see cref="IJwtUtil"/> as a singleton service. <para/>
     /// </summary>
+    /// <returns>Adds <see cref="IJwtUtil"/> as a singleton service. <para/>.</returns>
     public static IServiceCollection AddJwtUtilAsSingleton(this IServiceCollection services)
     {
         services.TryAddSingleton<IJwtUtil, JwtUtil>();

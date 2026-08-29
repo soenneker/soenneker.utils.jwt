@@ -15,10 +15,14 @@ namespace Soenneker.Utils.Jwt.Abstract;
 /// </summary>
 public interface IJwtUtil
 {
-    /// <param name="jwtAudience">ClientId of the application within AzureAd</param>
-    /// <param name="jwtIssuer"></param>
-    /// <param name="publicKey"></param>
-    /// <param name="exponent"></param>
+    /// <summary>
+    /// Builds JWT validation parameters for the expected audience and issuer using an RSA public key.
+    /// </summary>
+    /// <param name="jwtAudience">The required token audience.</param>
+    /// <param name="jwtIssuer">The required token issuer.</param>
+    /// <param name="publicKey">The Base64Url-encoded RSA modulus.</param>
+    /// <param name="exponent">The Base64Url-encoded RSA exponent.</param>
+    /// <returns>Parameters configured for audience, issuer, signature, and lifetime validation.</returns>
     [Pure]
     TokenValidationParameters GetValidationParameters(string jwtAudience, string jwtIssuer, string publicKey, string exponent);
 
@@ -34,6 +38,7 @@ public interface IJwtUtil
     /// <summary>
     /// Requires that <see cref="IConfiguration"/> be registered and configured in DI
     /// </summary>
+    /// <returns>Requires that <see cref="IConfiguration"/> be registered and configured in DI.</returns>
     [Pure]
     ValueTask<ClaimsPrincipal?> GetPrincipal(string token, bool validateLifetime = true, CancellationToken cancellationToken = default);
 
@@ -41,6 +46,7 @@ public interface IJwtUtil
     /// Create a compact HS256 JWT with only the essentials: sub, jti, iat, exp (+ optional extra claims).
     /// Reads SigningKey from config key "Jwt:SigningKey" unless provided.
     /// </summary>
+    /// <returns>Create a compact HS256 JWT with only the essentials: sub, jti, iat, exp (+ optional extra claims). Reads SigningKey from config key "Jwt:SigningKey" unless provided.</returns>
     [Pure]
     string Create(string subject, IDictionary<string, object>? extraClaims = null, TimeSpan? lifetime = null, string? signingKey = null);
 
@@ -49,6 +55,7 @@ public interface IJwtUtil
     /// Reads SigningKey from "Jwt:ClientState:SigningKey" unless provided.
     /// Returns ClaimsPrincipal on success, null on failure.
     /// </summary>
+    /// <returns>Verify signature and (optionally) lifetime. No issuer/audience validation. Reads SigningKey from "Jwt:ClientState:SigningKey" unless provided. Returns ClaimsPrincipal on success, null on failure.</returns>
     [Pure]
     ClaimsPrincipal? Verify(string token, bool validateLifetime = true, string? signingKey = null);
 }
