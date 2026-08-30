@@ -17,7 +17,6 @@ using System.Threading.Tasks;
 
 namespace Soenneker.Utils.Jwt;
 
-///<inheritdoc cref="IJwtUtil"/>
 public sealed class JwtUtil : IJwtUtil
 {
     private static readonly JwtSecurityTokenHandler _handler = new();
@@ -177,6 +176,10 @@ public sealed class JwtUtil : IJwtUtil
             _logger?.LogCritical(ex, "Invalid token signature");
             return null;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error decoding JWT");
@@ -187,7 +190,7 @@ public sealed class JwtUtil : IJwtUtil
     public string Create(string subject, IDictionary<string, object>? extraClaims = null, TimeSpan? lifetime = null, string? signingKey = null)
     {
         SigningCredentials credentials;
-        int ttlMinutes;
+        TimeSpan effectiveLifetime;
 
         if (signingKey is null)
         {
@@ -196,26 +199,23 @@ public sealed class JwtUtil : IJwtUtil
 
             DefaultSigningFeature feature = _defaultSigningFeature.Value;
             credentials = feature.SigningCredentials;
-            ttlMinutes = feature.TtlMinutes;
+            effectiveLifetime = lifetime ?? TimeSpan.FromMinutes(feature.TtlMinutes);
         }
         else
         {
             // Override path: do NOT cache unbounded key material
             credentials = new SigningCredentials(new SymmetricSecurityKey(signingKey.ToBytes()), SecurityAlgorithms.HmacSha256);
 
-            // Prefer default ttl if configured; otherwise read on-demand
-            if (_defaultSigningFeature is not null)
-            {
-                ttlMinutes = _defaultSigningFeature.Value.TtlMinutes;
-            }
+            if (lifetime is not null)
+                effectiveLifetime = lifetime.Value;
+            else if (_defaultSigningFeature is not null)
+                effectiveLifetime = TimeSpan.FromMinutes(_defaultSigningFeature.Value.TtlMinutes);
             else
-            {
-                ttlMinutes = _config?.GetValueStrict<int>("Jwt:LifetimeMinutes") ?? 0;
-            }
+                throw new InvalidOperationException("A lifetime is required when creating a token without configuration");
         }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        DateTimeOffset expires = now.Add(lifetime ?? TimeSpan.FromMinutes(ttlMinutes));
+        DateTimeOffset expires = now.Add(effectiveLifetime);
 
         var claims = new List<Claim>(3 + (extraClaims?.Count ?? 0))
         {

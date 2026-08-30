@@ -22,9 +22,61 @@ services.AddJwtUtilAsSingleton();
 
 Then inject `IJwtUtil` wherever you need it.
 
-## Common operations
+## Create and verify an HMAC token
 
-- `GetValidationParameters()` - Builds strict parameters from an explicit RSA key, issuer, and audience, or asynchronously loads rotating Azure OIDC signing keys from configuration. The Azure overload can disable lifetime validation.
-- `GetPrincipal()` - Validates a token with the configured Azure OIDC parameters and returns its `ClaimsPrincipal`; configuration is required.
-- `Create()` - Creates a compact HS256 token with `sub`, `jti`, `iat`, and `exp`, plus optional claims. It reads `Jwt:SigningKey` unless a key is supplied.
-- `Verify()` - Verifies HS256 signature and optionally lifetime, returning a principal on success and `null` on failure. It does not validate issuer or audience.
+Configure the default signing key and lifetime:
+
+```json
+{
+  "Jwt": {
+    "SigningKey": "a-long-random-secret-kept-out-of-source-control",
+    "LifetimeMinutes": 30
+  }
+}
+```
+
+```csharp
+string token = jwtUtil.Create(
+    subject: userId,
+    extraClaims: new Dictionary<string, object> { ["role"] = "admin" });
+
+ClaimsPrincipal? principal = jwtUtil.Verify(token);
+```
+
+`Create` emits an HS256 token containing `sub`, `jti`, `iat`, `nbf`, and `exp`. Extra claim values
+are converted to strings, and reserved claims supplied through `extraClaims` are ignored. You can
+provide both `signingKey` and `lifetime` directly when configuration is unavailable.
+
+`Verify` validates the signature and, by default, the expiration time with zero clock skew. It
+does not validate issuer or audience, so use it only where possession of the shared key is the
+intended trust boundary. Invalid or expired tokens return `null`.
+
+## Validate Azure OpenID Connect tokens
+
+The Azure overloads require these configuration values:
+
+```json
+{
+  "Azure": {
+    "AzureAd": {
+      "ClientId": "expected-audience",
+      "JwtIssuer": "https://login.microsoftonline.com/{tenant-id}/v2.0",
+      "MetadataAddress": "https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration"
+    }
+  }
+}
+```
+
+```csharp
+ClaimsPrincipal? principal = await jwtUtil.GetPrincipal(token, cancellationToken: cancellationToken);
+```
+
+This path validates the configured issuer, audience, signature, expiration, and rotating signing
+keys obtained from the HTTPS metadata endpoint. Invalid tokens return `null`; metadata retrieval
+errors are logged and also result in `null` from `GetPrincipal`. Requested cancellation propagates.
+
+## Other validation option
+
+`GetValidationParameters(audience, issuer, publicKey, exponent)` builds parameters for a specific
+RSA public key. The modulus and exponent must be Base64Url encoded. It enables issuer, audience,
+signature, and lifetime validation with zero clock skew.

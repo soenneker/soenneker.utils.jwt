@@ -10,8 +10,7 @@ using System.Threading.Tasks;
 namespace Soenneker.Utils.Jwt.Abstract;
 
 /// <summary>
-/// Various JWT related operations <para/>
-/// Typically Scoped IoC
+/// Creates and validates JSON Web Tokens using configured Azure OpenID Connect metadata or an HMAC signing key.
 /// </summary>
 public interface IJwtUtil
 {
@@ -27,7 +26,7 @@ public interface IJwtUtil
     TokenValidationParameters GetValidationParameters(string jwtAudience, string jwtIssuer, string publicKey, string exponent);
 
     /// <summary>
-    /// This is the method you want for rotating keys (live environments)
+    /// Builds validation parameters from the configured Azure OpenID Connect metadata and its rotating signing keys.
     /// </summary>
     /// <param name="validateLifetime"></param>
     /// <param name="cancellationToken"></param>
@@ -52,10 +51,10 @@ public interface IJwtUtil
 
     /// <summary>
     /// Verify signature and (optionally) lifetime. No issuer/audience validation.
-    /// Reads SigningKey from "Jwt:ClientState:SigningKey" unless provided.
+    /// Reads the signing key from "Jwt:SigningKey" unless one is provided.
     /// Returns ClaimsPrincipal on success, null on failure.
     /// </summary>
-    /// <returns>Verify signature and (optionally) lifetime. No issuer/audience validation. Reads SigningKey from "Jwt:ClientState:SigningKey" unless provided. Returns ClaimsPrincipal on success, null on failure.</returns>
+    /// <returns>Verify signature and (optionally) lifetime. No issuer/audience validation. Reads the signing key from "Jwt:SigningKey" unless provided. Returns ClaimsPrincipal on success, null on failure.</returns>
     [Pure]
     ClaimsPrincipal? Verify(string token, bool validateLifetime = true, string? signingKey = null);
 }
