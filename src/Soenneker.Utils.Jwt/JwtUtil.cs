@@ -17,6 +17,7 @@ using System.Threading.Tasks;
 
 namespace Soenneker.Utils.Jwt;
 
+/// <inheritdoc cref="IJwtUtil" />
 public sealed class JwtUtil : IJwtUtil
 {
     private static readonly JwtSecurityTokenHandler _handler = new();
