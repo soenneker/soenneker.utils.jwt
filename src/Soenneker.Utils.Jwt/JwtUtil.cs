@@ -51,8 +51,8 @@ public sealed class JwtUtil : IJwtUtil
         if (_config is null)
             throw new InvalidOperationException("Configuration is required");
 
-        var signingKeyRaw = _config.GetValueStrict<string>("Jwt:SigningKey");
-        var ttlMinutes = _config.GetValueStrict<int>("Jwt:LifetimeMinutes");
+        var signingKeyRaw = _config.GetStringStrict("Jwt:SigningKey");
+        var ttlMinutes = (int)new System.ComponentModel.Int32Converter().ConvertFromInvariantString(_config.GetStringStrict("Jwt:LifetimeMinutes"))!;
 
         byte[] keyBytes = signingKeyRaw.ToBytes();
 
@@ -71,9 +71,9 @@ public sealed class JwtUtil : IJwtUtil
         if (_config is null)
             throw new InvalidOperationException("Configuration is required");
 
-        var audience = _config.GetValueStrict<string>("Azure:AzureAd:ClientId");
-        var issuer = _config.GetValueStrict<string>("Azure:AzureAd:JwtIssuer");
-        var metadataAddress = _config.GetValueStrict<string>("Azure:AzureAd:MetadataAddress");
+        var audience = _config.GetStringStrict("Azure:AzureAd:ClientId");
+        var issuer = _config.GetStringStrict("Azure:AzureAd:JwtIssuer");
+        var metadataAddress = _config.GetStringStrict("Azure:AzureAd:MetadataAddress");
 
         var documentRetriever = new HttpDocumentRetriever { RequireHttps = true };
 
